@@ -314,6 +314,12 @@ class VisionEngine:
             print(f"[Vision] 使用云端通道: {self.config.openrouter_model}")
             result = self._call_cloud_vision(data_url, question)
 
+            # 云端失败时降级到本地（如果有本地可用）
+            if not result["success"] and self.config.ollama_available:
+                print("[Vision] 云端失败，降级到本地通道...")
+                result = self._call_local_vision(image_path, question)
+                channel = VisionChannel.LOCAL
+
         else:
             result = {"success": False, "error": "未知通道"}
 

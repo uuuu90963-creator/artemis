@@ -9,12 +9,26 @@ import sys
 import json
 import asyncio
 import sqlite3
+import logging
 from pathlib import Path
 from typing import Dict, Any, Optional, List
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
 import httpx
 import dotenv
+
+# ===== 日志配置 =====
+LOG_DIR = BASE_DIR / "logs"
+LOG_DIR.mkdir(parents=True, exist_ok=True)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    handlers=[
+        logging.FileHandler(LOG_DIR / "telegram_bot.log"),
+        logging.StreamHandler(sys.stderr),
+    ],
+)
+logger = logging.getLogger("artemis.telegram")
 
 # 基础路径
 BASE_DIR = Path.home() / ".hermes" / "artemis"
@@ -54,9 +68,12 @@ class ConversationDB:
         self._init_db()
 
     def _init_db(self):
-        """初始化数据库"""
+        """初始化数据库（带 WAL 模式提升并发性能）"""
         conn = sqlite3.connect(self.db_path)
         c = conn.cursor()
+        # 启用 WAL 模式：写操作不阻塞读操作
+        c.execute("PRAGMA journal_mode=WAL")
+        c.execute("PRAGMA synchronous=NORMAL")  # 平衡性能和安全
         c.execute("""
             CREATE TABLE IF NOT EXISTS conversations (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -68,20 +85,13 @@ class ConversationDB:
                 message_id INTEGER
             )
         """)
-        c.execute("""
-            CREATE INDEX IF NOT EXISTS idx_chat_id ON conversations(chat_id)
-        """)
-        c.execute("""
-            CREATE INDEX IF NOT EXISTS idx_timestamp ON conversations(timestamp)
-        """)
+        # 索引：按 chat_id 查历史，按 timestamp 排序
+        c.execute("CREATE INDEX IF NOT EXISTS idx_chat_id ON conversations(chat_id)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_timestamp ON conversations(timestamp)")
+        # 复合索引：常用查询优化
+        c.execute("CREATE INDEX IF NOT EXISTS idx_chat_time ON conversations(chat_id, timestamp DESC)")
         conn.commit()
         conn.close()
-        # 验证表是否创建成功
-        conn = sqlite3.connect(self.db_path)
-        tables = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='conversations'").fetchall()
-        conn.close()
-        if not tables:
-            raise RuntimeError(f"数据库表创建失败: {self.db_path}")
     
     def add_message(self, chat_id: int, role: str, content: str,
                     image_path: Optional[str] = None, message_id: Optional[int] = None):

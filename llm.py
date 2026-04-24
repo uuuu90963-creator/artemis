@@ -525,8 +525,9 @@ class LLMClient:
                     payload["tools"] = tools
                     payload["tool_choice"] = "auto"
             
-            # Override stream in payload
-            payload["stream"] = stream
+            # NOTE: streaming not yet implemented - always False
+            # TODO: use httpx.AsyncClient + stream=True for real streaming
+            payload["stream"] = False
             
             # Get headers and endpoint
             headers = self._get_headers(provider)
