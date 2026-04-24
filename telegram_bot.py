@@ -17,7 +17,12 @@ from concurrent.futures import ThreadPoolExecutor
 import httpx
 import dotenv
 
-# ===== 日志配置 =====
+# 基础路径（必须在 LOG_DIR 之前定义）
+BASE_DIR = Path.home() / ".hermes" / "artemis"
+CACHE_DIR = BASE_DIR / "cache" / "images"
+CACHE_DIR.mkdir(parents=True, exist_ok=True)
+
+# ===== 日志配置（必须在 BASE_DIR 之后） =====
 LOG_DIR = BASE_DIR / "logs"
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 logging.basicConfig(
@@ -29,11 +34,6 @@ logging.basicConfig(
     ],
 )
 logger = logging.getLogger("artemis.telegram")
-
-# 基础路径
-BASE_DIR = Path.home() / ".hermes" / "artemis"
-CACHE_DIR = BASE_DIR / "cache" / "images"
-CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 # 加载环境变量（手动解析 .env 文件）
 ENV_PATH = Path.home() / ".hermes" / ".env"
