@@ -569,9 +569,17 @@ class ArtemisTelegramBot:
         if self.agent:
             try:
                 if file_path:
-                    response = self.agent.chat(text, image=file_path)
+                    result = self.agent.chat(text, image=file_path)
                 else:
-                    response = self.agent.chat(text)
+                    result = self.agent.chat(text)
+                # agent.chat() 返回 Dict，提取 content 字段
+                if isinstance(result, dict):
+                    if result.get("success"):
+                        response = result.get("content", "(无内容)")
+                    else:
+                        response = f"处理失败: {result.get('content', str(result))[:200]}"
+                else:
+                    response = str(result)
             except Exception as e:
                 response = f"处理消息时出错: {str(e)}"
         else:
