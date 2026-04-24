@@ -1,0 +1,11 @@
+{
+    "version": "1.0.0",
+    "plugins": [
+        {
+            "name": "example_plugin",
+            "path": "example_plugin",
+            "enabled": true,
+            "installed_at": "2026-04-23"
+        }
+    ]
+}

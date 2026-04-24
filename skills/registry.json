@@ -1,0 +1,150 @@
+{
+  "version": "1.0.0",
+  "skills": [
+    {
+      "name": "medical-literature",
+      "version": "1.0.0",
+      "trigger_keywords": ["文献", "论文", "PubMed", "PMID", "研究", "临床试验", "meta分析", "系统综述", "医学文献", "查找文献"],
+      "description": "医学文献查找与下载，支持 PMID 精确查找和关键词搜索（示例技能，完整实现）",
+      "enabled": true,
+      "skills": ["medical-guidelines", "clinical-notes"],
+      "path": "medical-literature"
+    },
+    {
+      "name": "coding",
+      "version": "1.0.0",
+      "trigger_keywords": ["编程", "写代码", "代码", "Python", "JavaScript", "Java", "C++", "Go", "Rust", "编程语言", "debug", "调试", "重构", "算法"],
+      "description": "编程助手，支持多种语言代码编写、调试、重构和优化",
+      "enabled": true,
+      "path": "coding"
+    },
+    {
+      "name": "web-search",
+      "version": "1.0.0",
+      "trigger_keywords": ["搜索", "查找", "google", "百度", "bing", "查询", "网上搜索", "搜索一下", "帮我查"],
+      "description": "网络搜索，获取实时信息和最新资讯",
+      "enabled": true,
+      "path": "web-search"
+    },
+    {
+      "name": "article-writing",
+      "version": "1.0.0",
+      "trigger_keywords": ["写文章", "写作", "文章", "文案", "内容创作", "博客", "报告", "总结", "起草", "撰写"],
+      "description": "文章写作助手，支持各类文案、报告、邮件、博客等内容创作",
+      "enabled": true,
+      "path": "article-writing"
+    },
+    {
+      "name": "data-analysis",
+      "version": "1.0.0",
+      "trigger_keywords": ["分析数据", "数据分析", "统计", "图表", "可视化", "Excel", "CSV", "清洗数据", "建模", "机器学习"],
+      "description": "数据分析和可视化，支持数据清洗、统计分析和图表生成",
+      "enabled": true,
+      "path": "data-analysis"
+    },
+    {
+      "name": "file-operation",
+      "version": "1.0.0",
+      "trigger_keywords": ["文件", "读取", "写入", "保存", "下载", "上传", "移动", "复制", "删除", "目录"],
+      "description": "文件操作助手，处理各类文件的读写和管理",
+      "enabled": true,
+      "path": "file-operation"
+    },
+    {
+      "name": "math-calc",
+      "version": "1.0.0",
+      "trigger_keywords": ["计算", "数学", "公式", "方程", "微积分", "线性代数", "概率", "统计", "算一下"],
+      "description": "数学计算和问题求解，支持基础数学到高等数学",
+      "enabled": true,
+      "path": "math-calc"
+    },
+    {
+      "name": "translation",
+      "version": "1.0.0",
+      "trigger_keywords": ["翻译", "中英翻译", "英汉", "外语", "译成", "translate"],
+      "description": "多语言翻译，支持中英及其他语言的互译",
+      "enabled": true,
+      "path": "translation"
+    },
+    {
+      "name": "image-generation",
+      "version": "1.0.0",
+      "trigger_keywords": ["画图", "生成图片", "AI绘图", "图像生成", "画一幅", "设计图片"],
+      "description": "AI图像生成，根据描述创建图片",
+      "enabled": true,
+      "path": "image-generation"
+    },
+    {
+      "name": "research",
+      "version": "1.0.0",
+      "trigger_keywords": ["研究", "调研", "调查", "综述", "背景", "现状", "前沿", "发展趋势"],
+      "description": "研究调研助手，帮助梳理研究背景、现状和发展趋势",
+      "enabled": true,
+      "path": "research"
+    },
+    {
+      "name": "presentation",
+      "version": "1.0.0",
+      "trigger_keywords": ["PPT", "幻灯片", "演示", "汇报", "演讲稿", "讲课", "课件"],
+      "description": "演示文稿制作，支持PPT大纲和演讲稿撰写",
+      "enabled": true,
+      "path": "presentation"
+    },
+    {
+      "name": "qa",
+      "version": "1.0.0",
+      "trigger_keywords": ["问答", "回答", "解释", "什么是", "为什么", "如何", "怎么"],
+      "description": "智能问答，解答各类知识性问题",
+      "enabled": true,
+      "path": "qa"
+    },
+    {
+      "name": "brainstorm",
+      "version": "1.0.0",
+      "trigger_keywords": ["头脑风暴", "创意", "想法", "点子", "建议", "方案", "策划"],
+      "description": "创意头脑风暴，生成创意点子和解决方案",
+      "enabled": true,
+      "path": "brainstorm"
+    },
+    {
+      "name": "medical-guidelines",
+      "version": "1.0.0",
+      "trigger_keywords": ["指南", "共识", "规范", "标准治疗", "一线用药", "诊疗指南"],
+      "description": "⚠️ 医学指南查询（示例技能，待完善）",
+      "enabled": false,
+      "path": "medical-guidelines"
+    },
+    {
+      "name": "clinical-notes",
+      "version": "1.0.0",
+      "trigger_keywords": ["病历", "病程", "记录", "小结", "出院小结", "入院记录"],
+      "description": "⚠️ 临床笔记整理（示例技能，待完善）",
+      "enabled": false,
+      "path": "clinical-notes"
+    },
+    {
+      "name": "medical-ai",
+      "version": "1.0.0",
+      "trigger_keywords": ["AI", "人工智能", "大模型", "医疗AI", "辅助诊断", "最新进展"],
+      "description": "⚠️ 医疗AI追踪（示例技能，待完善）",
+      "enabled": false,
+      "path": "medical-ai"
+    },
+    {
+      "name": "clinical-pharmacology",
+      "version": "1.0.0",
+      "trigger_keywords": ["药品", "药物", "剂量", "配伍", "禁忌", "相互作用", "肝肾功能"],
+      "description": "⚠️ 临床用药助手（示例技能，待完善）",
+      "enabled": false,
+      "path": "clinical-pharmacology"
+    },
+    {
+      "name": "medical-imaging",
+      "version": "1.0.0",
+      "trigger_keywords": ["影像", "CT", "MRI", "X线", "X光", "读片", "超声", "片子"],
+      "description": "⚠️ 医学影像解读（示例技能，待完善）",
+      "enabled": false,
+      "path": "medical-imaging"
+    }
+  ]
+}

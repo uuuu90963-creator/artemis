@@ -1,0 +1,3 @@
+{"timestamp": "2026-04-23T16:29:46.680428", "task": "你好，帮我看看这个医学影像", "result": "[模拟响应] 已处理 medical 任务", "success": true, "task_type": "medical", "complexity": "complex"}
+{"timestamp": "2026-04-23T16:33:02.010266", "task": "你好，帮我看看这个医学影像", "result": "[模拟响应] 已处理 medical 任务", "success": true, "task_type": "medical", "complexity": "complex"}
+{"timestamp": "2026-04-23T16:53:05.275748", "task": "你好，帮我看看这个医学影像", "result": "LLM 调用失败: Provider 'minimax' is not available (missing API key)", "success": false, "task_type": "medical", "complexity": "complex"}

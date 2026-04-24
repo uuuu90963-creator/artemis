@@ -1,0 +1,11 @@
+{
+    "name": "example_plugin",
+    "version": "1.0.0",
+    "description": "示例 MCP 插件，包含天气查询、计算器、时间和问候语功能",
+    "author": "Artemis",
+    "tags": ["example", "utility", "weather", "calculator"],
+    "tools": ["get_weather", "calc", "get_time", "greet"],
+    "resources": {},
+    "enabled": true,
+    "installed_at": "2026-04-23"
+}
