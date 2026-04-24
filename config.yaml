@@ -37,3 +37,8 @@ display:
   show_cost: true
   show_provider: true
   show_thinking: false
+upgrade:
+  auto_upgrade: false     # true=自动静默升级，false=只通知用户确认
+  silent: false           # true=完全不打扰，false=有更新时通知
+  notify_on_startup: true  # 启动时是否检查并通知
+  github_repo: uuuu90963-creator/artemis

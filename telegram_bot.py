@@ -277,6 +277,8 @@ class ArtemisTelegramBot:
         command = command.lower().strip("/")
         
         if command == "start":
+            # 启动时异步检查升级（不阻塞欢迎语）
+            asyncio.create_task(self.notify_upgrade_if_available(chat_id))
             return self.cmd_start(chat_id)
         elif command == "help":
             return self.cmd_help()
@@ -291,6 +293,8 @@ class ArtemisTelegramBot:
             state = self.get_user_state(chat_id)
             state["waiting_for_vision"] = True
             return "📷 请发送一张图片，我会帮你分析。"
+        elif command == "upgrade":
+            return await self.cmd_upgrade(args)
         elif command == "artemis":
             # /artemis 开头的消息，后面内容当普通消息处理
             return None  # 交给普通消息处理
@@ -311,6 +315,7 @@ class ArtemisTelegramBot:
 • `/skills` - 查看可用技能
 • `/model <name>` - 切换模型 (minimax/openrouter/deepseek)
 • `/vision` - 分析图片
+• `/upgrade` - 检查/执行版本升级
 
 **使用方式：**
 • 直接发送消息与我对话
@@ -333,11 +338,15 @@ class ArtemisTelegramBot:
 **高级功能：**
 • `/model <name>` - 切换 AI 模型
   支持: `minimax`, `openrouter`, `deepseek`
-  
+ 
 • `/vision` - 进入图片分析模式
   发送图片后会自动分析
-  
+ 
 • `/skills` - 查看已安装的技能
+
+• `/upgrade` - 检查/执行版本升级
+  `/upgrade` - 查看是否有新版本
+  `/upgrade now` - 执行升级
 
 **对话：**
 • 直接发送文字开始对话
@@ -376,6 +385,71 @@ class ArtemisTelegramBot:
         # 注意：这里只是记录用户偏好，实际模型切换需要 agent 支持
         return f"✅ 已切换到 `{args}` 模型\n\n(模型切换功能需要后端支持)"
     
+    async def cmd_upgrade(self, args: str) -> str:
+        """升级命令"""
+        # 动态导入避免循环依赖
+        try:
+            from upgrader import UpgradeChecker, format_telegram_upgrade_message
+        except ImportError:
+            return "⚠️ 升级模块不可用，请重新安装 Artemis。"
+
+        # 检查是否在 bot 配置中开启了自动升级通知
+        config = getattr(self, 'config', {}) or {}
+        upgrade_cfg = config.get("upgrade", {})
+        checker = UpgradeChecker({
+            "auto_upgrade": upgrade_cfg.get("auto_upgrade", False),
+            "silent": False,  # 用户主动触发，不静默
+        })
+
+        if args.strip().lower() == "now":
+            # 执行升级
+            result = checker.upgrade()
+            if result["success"]:
+                return f"🚀 升级成功！\n\n新版本: `{result['new_version']}`\n{result['message']}"
+            else:
+                return f"❌ 升级失败:\n{result['message']}"
+
+        # 检查新版本
+        check_result = checker.check()
+        if not check_result["has_update"]:
+            if check_result.get("auto_upgraded"):
+                return f"✅ {check_result['message']}"
+            return f"✅ 当前已是最新版本: `{check_result['current_version']}`"
+
+        # 有新版本，显示通知
+        msg = format_telegram_upgrade_message(check_result)
+        return msg
+
+    async def notify_upgrade_if_available(self, chat_id: int) -> None:
+        """
+        启动时检查并推送升级通知（非阻塞）
+        只通知一次，避免重复打扰用户
+        """
+        try:
+            from upgrader import UpgradeChecker
+        except ImportError:
+            return
+
+        config = getattr(self, 'config', {}) or {}
+        upgrade_cfg = config.get("upgrade", {})
+        if not upgrade_cfg.get("notify_on_startup", True):
+            return
+
+        checker = UpgradeChecker({
+            "auto_upgrade": upgrade_cfg.get("auto_upgrade", False),
+            "silent": True,  # 静默检查，不自动升级
+        })
+        result = checker.check()
+
+        if result["has_update"] and result["message"]:
+            await self.send_message(chat_id, result["message"])
+        elif result.get("auto_upgraded"):
+            await self.send_message(
+                chat_id,
+                f"🚀 已自动升级到新版本: `{result['latest_version']}`"
+            )
+        # 没有更新时不做任何提示，避免噪音
+
     async def process_message(self, chat_id: int, text: str, 
                               message_id: int, photo: Optional[str] = None,
                               file_path: Optional[str] = None) -> str:
