@@ -1,12 +1,52 @@
+# Git
+.git/
+.gitignore
+
+# Python
 __pycache__/
 *.py[cod]
-*.egg-info/
-.eggs/
+*.egg-info
+.eggs
+*.egg
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# 虚拟环境
+venv/
+.venv/
+env/
+
+# 日志和缓存
+logs/
+*.log
+memories/*.db
+
+# 本地配置（会在容器内自动创建）
+.env
+.env.local
+.env.*
+
+# GitHub 相关（这些是项目文件，不应该被忽略）
+# README.md
+# LICENSE
+# SOUL.md
+# install.sh
+# install.ps1
+# Dockerfile
+# docker-compose.yml
+# .dockerignore
+
+# 临时文件
+*.tmp
+*.temp
+.DS_Store
+Thumbs.db
+
+# 开发产物
 dist/
 build/
-*.log
-logs/*.log
-.env
-memories/
-workspace/
-.DS_Store
+*.whl

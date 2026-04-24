@@ -1,0 +1,67 @@
+# Artemis Agent - Docker Compose 配置
+# 支持一键启动完整环境（含可选 Ollama 视觉支持）
+
+version: "3.8"
+
+services:
+  # Artemis 主服务
+  artemis:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: artemis-agent
+    restart: unless-stopped
+    environment:
+      # MiniMax API（必填）
+      - MINIMAX_API_KEY=${MINIMAX_API_KEY:-your_minimax_key_here}
+      # OpenRouter API（推荐，支持 vision）
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-your_openrouter_key_here}
+      # 可选：Telegram Bot
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+      # Ollama 配置（如果启用）
+      - OLLAMA_BASE_URL=http://ollama:11434
+      - OLLAMA_VISION_MODEL=llava:7b
+    volumes:
+      # 持久化记忆和配置
+      - artemis-data:/root/.hermes/artemis
+      # 挂载项目目录（开发模式）
+      - .:/app
+    ports:
+      - "8000:8000"  # TUI 端口（如需要）
+    depends_on:
+      - ollama
+    networks:
+      - artemis-net
+    # 无 Telegram 时用 TUI 模式
+    stdin_open: true
+    tty: true
+
+  # 可选：Ollama 本地视觉服务
+  # 取消注释以启用本地视觉（省云端费用）
+  # ollama:
+  #   image: ollama/ollama:latest
+  #   container_name: artemis-ollama
+  #   restart: unless-stopped
+  #   ports:
+  #     - "11434:11434"
+  #   volumes:
+  #     - ollama-data:/root/.ollama
+  #   networks:
+  #     - artemis-net
+  #   deploy:
+  #     resources:
+  #       reservations:
+  #         devices:
+  #           - driver: nvidia
+  #             count: all
+  #             capabilities: [gpu]
+
+volumes:
+  artemis-data:
+    driver: local
+  # ollama-data:
+  #   driver: local
+
+networks:
+  artemis-net:
+    driver: bridge

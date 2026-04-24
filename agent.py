@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Artemis Agent Loop - 真正的 Agent 执行引擎
-支持：工具调用、流式输出、上下文压缩、成本追踪
+支持：工具调用、流式输出、上下文压缩、成本追踪、双通道视觉
 """
 
 import os
@@ -14,6 +14,14 @@ from datetime import datetime
 from collections import defaultdict
 
 BASE_DIR = Path.home() / ".hermes" / "artemis"
+
+# 导入 Vision Engine（支持 Ollama 本地 + OpenRouter 云端双通道）
+try:
+    from vision import VisionEngine, VisionChannel, create_vision_engine
+    HAS_VISION = True
+except ImportError:
+    HAS_VISION = False
+    VisionEngine = None
 
 
 # ======== 成本追踪 ========
@@ -201,15 +209,28 @@ class ContextCompressor:
 class ArtemisAgent:
     """
     Artemis Agent 执行引擎
-    核心：支持工具调用的多轮对话循环
+    核心：支持工具调用的多轮对话循环 + 双通道视觉
     """
     
-    def __init__(self, llm_client, plugins_manager=None):
+    def __init__(self, llm_client, plugins_manager=None, vision_engine=None):
         self.llm = llm_client
         self.plugins = plugins_manager
         self.cost_tracker = CostTracker()
         self.compressor = ContextCompressor()
         self.max_turns = 10  # 最多 N 轮工具调用，防止死循环
+        
+        # 视觉引擎（支持 Ollama 本地 + OpenRouter 云端双通道）
+        if vision_engine is not None:
+            self.vision = vision_engine
+        elif HAS_VISION and vision_engine is not False:
+            try:
+                self.vision = create_vision_engine()
+                print(f"[Agent] ✓ 视觉引擎已初始化 (Ollama: {'可用' if self.vision.config.ollama_available else '不可用'})")
+            except Exception as e:
+                print(f"[Agent] ⚠ 视觉引擎初始化失败: {e}")
+                self.vision = None
+        else:
+            self.vision = None
         
         # 对话历史（当前任务）
         self.messages: List[Dict] = []
@@ -219,8 +240,18 @@ class ArtemisAgent:
         self.messages = []
     
     def _build_messages(self, prompt: str, system_prompt: str, image: str = None,
-                       prepend_messages: List[Dict] = None) -> List[Dict]:
-        """构建消息列表"""
+                       prepend_messages: List[Dict] = None,
+                       image_description: str = None) -> List[Dict]:
+        """
+        构建消息列表
+        
+        Args:
+            prompt: 用户消息
+            system_prompt: 系统提示词
+            image: 可选的图片路径/URL/base64
+            prepend_messages: 追加的历史消息
+            image_description: 视觉引擎预处理后的图片描述（当 LLM 不支持 vision 时）
+        """
         msgs = []
         
         # System 消息
@@ -233,17 +264,26 @@ class ArtemisAgent:
         
         # 用户消息
         if image:
-            # 图片消息格式
-            msgs.append({
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": prompt},
-                    {"type": "image_url", "image_url": {"url": image}}
-                ] if not image.startswith("data:") else [
-                    {"type": "text", "text": prompt},
-                    {"type": "image_url", "image_url": {"url": image}}
-                ]
-            })
+            # 如果有预处理描述，说明 LLM 不支持 vision，用文字描述代替
+            if image_description:
+                content = (
+                    f"[用户上传了一张图片，图片分析结果如下]\n"
+                    f"{image_description}\n\n"
+                    f"用户的问题是：{prompt}"
+                )
+                msgs.append({"role": "user", "content": content})
+            elif image.startswith("data:") or image.startswith("http"):
+                # 云端支持直接传图片
+                msgs.append({
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt},
+                        {"type": "image_url", "image_url": {"url": image}}
+                    ]
+                })
+            else:
+                # 本地文件路径，需要先读取
+                msgs.append({"role": "user", "content": f"[Image: {image}] {prompt}"})
         else:
             msgs.append({"role": "user", "content": prompt})
         
@@ -337,7 +377,7 @@ class ArtemisAgent:
         context_messages: List[Dict] = None,
     ) -> Dict[str, Any]:
         """
-        核心 chat 接口（支持工具调用）
+        核心 chat 接口（支持工具调用 + 双通道视觉）
         
         Args:
             prompt: 用户消息
@@ -352,12 +392,47 @@ class ArtemisAgent:
             {"success": bool, "content": str, "provider": str, "model": str,
              "usage": {}, "tool_calls": [], "total_turns": int, "cost_usd": float}
         """
-        # 获取工具
+        # ===== 图片预处理：Vision Engine 双通道 =====
+        image_description = None
+        processed_image = image  # 最终传给 LLM 的图片
+        
+        if image and self.vision:
+            # 判断任务复杂度（默认 medium）
+            # 医学影像相关用复杂模式
+            medical_keywords = ["ct", "mri", "x光", "x线", "超声", "影像",
+                               "片子", "诊断", "病灶", "肿瘤", "骨折", "心电图"]
+            complexity = "complex" if any(kw in prompt.lower() for kw in medical_keywords) else "medium"
+            
+            try:
+                # 使用 VisionEngine 分析图片（自动选择 Ollama 或 OpenRouter）
+                vision_result = self.vision.analyze(
+                    image_path=image if Path(image).exists() else None,
+                    question=prompt,
+                    complexity=complexity
+                )
+                
+                if vision_result.get("success"):
+                    channel = vision_result.get("selected_channel", "unknown")
+                    print(f"[Agent] ✓ 视觉分析完成 (通道: {channel})")
+                    
+                    # 如果是本地 Ollama 处理，不需要传图片给 LLM 了
+                    if channel == "local":
+                        image_description = vision_result.get("content", "")
+                        processed_image = None  # 不再传图片给 LLM
+                    # 云端处理的话，直接传图片给 LLM（LLM 自己看）
+                else:
+                    print(f"[Agent] ⚠ 视觉分析失败: {vision_result.get('error')}, 尝试备用方案")
+                    # fallback: 传图片让 LLM 直接看（如果支持的话）
+            except Exception as e:
+                print(f"[Agent] ⚠ 视觉预处理异常: {e}")
+                # 继续尝试直接传图片给 LLM
+        
+        # ===== 获取工具 =====
         if tools is None:
             tools = self._get_tools()
         
-        # 构建初始消息
-        messages = self._build_messages(prompt, system_prompt, image)
+        # 构建初始消息（传入预处理后的图片描述）
+        messages = self._build_messages(prompt, system_prompt, processed_image, image_description=image_description)
         
         # 追加上下文
         if context_messages:
@@ -539,6 +614,6 @@ class ArtemisAgent:
 
 # ======== 便捷函数 ========
 
-def create_agent(llm_client, plugins_manager=None) -> ArtemisAgent:
-    """创建 Agent 实例"""
-    return ArtemisAgent(llm_client, plugins_manager)
+def create_agent(llm_client, plugins_manager=None, vision_engine=None) -> ArtemisAgent:
+    """创建 Agent 实例（自动初始化视觉引擎）"""
+    return ArtemisAgent(llm_client, plugins_manager, vision_engine=vision_engine)
