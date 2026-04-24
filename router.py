@@ -139,8 +139,8 @@ class TaskRouter:
         if any(kw in task_text for kw in self.MEDICAL_KEYWORDS):
             return TaskType.MEDICAL.value
         
-        # 检查代码关键词
-        if any(kw in text_lower for kw in self.CODE_KEYWORDS):
+        # 检查代码关键词（case-insensitive）
+        if any(kw.lower() in text_lower for kw in self.CODE_KEYWORDS):
             return TaskType.CODE.value
         
         # 检查复杂推理

@@ -6,6 +6,7 @@ set -e
 
 ARTEMIS_DIR="$HOME/.hermes/artemis"
 GITHUB_REPO="uuuu90963-creator/artemis"
+ENV_FILE="$HOME/.hermes/.env"
 
 echo "=================================================="
 echo "  Artemis Agent 安装脚本"
@@ -43,10 +44,12 @@ fi
 
 # 安装依赖
 echo "[*] 安装 Python 依赖..."
-pip install -q rich pyyaml httpx python-dotenv
+pip install -q rich pyyaml httpx
 
-# 创建配置目录
-mkdir -p "$HOME/.hermes"
+# 创建必要目录
+mkdir -p "$HOME/.hermes/artemis/memories"
+mkdir -p "$HOME/.hermes/artemis/logs"
+mkdir -p "$HOME/.hermes/artemis/cache"
 
 # ==================== 交互式模型选择 ====================
 echo ""
@@ -112,7 +115,7 @@ esac
 echo ""
 echo "[*] 文本模型: $TEXT_PROVIDER / $TEXT_MODEL"
 
-# Vision 模型选择（如果选的不是纯文字）
+# Vision 模型选择
 VISION_PROVIDER="openrouter"
 VISION_MODEL="openai/gpt-4o-mini"
 
@@ -192,72 +195,105 @@ echo ""
 echo "[*] 写入配置文件..."
 
 # 创建 .env
-cat > "$HOME/.hermes/.env" << EOF
+cat > "$ENV_FILE" << ENVEOF
 # Artemis 配置文件
 # 由 install.sh 自动生成
 
 # MiniMax API
-MINIMAX_API_KEY=$MINIMAX_KEY
+MINIMAX_API_KEY=${MINIMAX_KEY}
 MINIMAX_BASE_URL=https://api.minimaxi.com/v1
 
 # OpenRouter API（vision + tool calling）
-OPENROUTER_API_KEY=$OPENROUTER_KEY
+OPENROUTER_API_KEY=${OPENROUTER_KEY}
 
 # Anthropic API
-ANTHROPIC_API_KEY=$ANTHROPIC_KEY
+ANTHROPIC_API_KEY=${ANTHROPIC_KEY}
 
 # DeepSeek API
-DEEPSEEK_API_KEY=$DEEPSEEK_KEY
+DEEPSEEK_API_KEY=${DEEPSEEK_KEY}
 
 # Google API
-GOOGLE_API_KEY=$GOOGLE_KEY
+GOOGLE_API_KEY=${GOOGLE_KEY}
 
 # Telegram Bot
-TELEGRAM_BOT_TOKEN=$TELEGRAM_TOKEN
-TELEGRAM_ALLOWED_USERS=$ALLOWED_USERS
+TELEGRAM_BOT_TOKEN=${TELEGRAM_TOKEN}
+TELEGRAM_ALLOWED_USERS=${ALLOWED_USERS}
+ENVEOF
 
-# 默认模型
-DEFAULT_TEXT_PROVIDER=$TEXT_PROVIDER
-DEFAULT_TEXT_MODEL=$TEXT_MODEL
-DEFAULT_VISION_PROVIDER=$VISION_PROVIDER
-DEFAULT_VISION_MODEL=$VISION_MODEL
-EOF
+# 创建 config.yaml（新格式，带 schema 版本）
+cat > "$ARTEMIS_DIR/config.yaml" << CONFIGEOF
+# Artemis 配置（Schema v1）
+_schema_version: 1
 
-# 创建 config.yaml
-cat > "$ARTEMIS_DIR/config.yaml" << EOF
-# Artemis 配置
-version: "1.0.0"
-name: "artemis"
+model:
+  text: "${TEXT_PROVIDER}:${TEXT_MODEL}"
+  vision: "${VISION_PROVIDER}:${VISION_MODEL}"
+  reasoning: "openrouter:openai/gpt-4o-mini"
 
 routing:
-  text_default: "$TEXT_PROVIDER"
-  vision_primary: "$VISION_PROVIDER"
+  text_default: "${TEXT_PROVIDER}"
+  vision_primary: "${VISION_PROVIDER}"
+  vision_fallback: "local"
 
-providers:
-  minimax:
-    enabled: true
-    default_model: "abab6.5s-chat"
-  openrouter:
-    enabled: true
-    default_model: "openai/gpt-4o-mini"
-  deepseek:
-    enabled: true
-    default_model: "deepseek-chat"
-  anthropic:
-    enabled: true
-    default_model: "claude-3-sonnet-4-20250514"
-  google:
-    enabled: true
-    default_model: "gemini-2.0-flash"
+tools:
+  enabled_toolsets:
+    - file
+    - memory
+    - web
+  disabled_tools: []
+  max_file_size_mb: 10
+  terminal_timeout: 60
 
 memory:
-  enabled: true
-  db_path: "memories/memory.db"
+  db_path: "~/.hermes/artemis/memories/memory.db"
+  max_memories: 10000
+  similarity_threshold: 0.01
 
-cron:
-  enabled: true
-  log_dir: "logs"
-EOF
+telegram:
+  enabled: false
+  allowed_users: []
+  reply_to_message: true
+  streaming: false
+
+agent:
+  max_turns: 20
+  max_tokens_per_message: 500
+  context_window: 128000
+  auto_save: true
+
+security:
+  approve_all: false
+  block_high_danger: true
+  dangerous_commands_log: "~/.hermes/artemis/logs/commands.log"
+
+display:
+  show_cost: true
+  show_provider: true
+  show_thinking: false
+CONFIGEOF
+
+# 设置安全权限
+chmod 600 "$ENV_FILE"
+chmod 600 "$ARTEMIS_DIR/config.yaml"
+
+# ==================== 安装 CLI ====================
+echo ""
+echo "[*] 安装 CLI 入口..."
+
+# 创建 ~/.local/bin 目录（如果没有）
+mkdir -p "$HOME/.local/bin"
+
+# 创建 CLI 软链接
+ln -sf "$ARTEMIS_DIR/artemis_cli.py" "$HOME/.local/bin/artemis"
+chmod +x "$ARTEMIS_DIR/artemis_cli.py"
+
+# 检查 PATH
+if [[ ":$PATH:" == *":$HOME/.local/bin:"* ]]; then
+    echo "[*] ~/.local/bin 已在 PATH 中"
+else
+    echo "[!] 请将 ~/.local/bin 添加到 PATH:"
+    echo "    echo 'export PATH=\$HOME/.local/bin:\$PATH' >> ~/.bashrc"
+fi
 
 echo ""
 echo "=================================================="
@@ -265,10 +301,15 @@ echo "  安装完成！"
 echo "=================================================="
 echo ""
 echo "运行方式："
-echo "  python3 $ARTEMIS_DIR/artemis.py          # 交互模式"
-echo "  python3 $ARTEMIS_DIR/telegram_bot.py     # Telegram 模式"
+echo "  artemis                    # 交互式聊天（推荐）"
+echo "  artemis run '任务描述'      # 单次任务"
+echo "  artemis tools              # 查看工具"
+echo "  artemis status             # 查看状态"
+echo "  artemis setup              # 重新配置"
 echo ""
-echo "配置文件已保存到："
-echo "  ~/.hermes/.env"
-echo "  $ARTEMIS_DIR/config.yaml"
+echo "CLI 命令已安装到: ~/.local/bin/artemis"
+echo ""
+echo "配置文件："
+echo "  ~/.hermes/.env             # API Keys"
+echo "  $ARTEMIS_DIR/config.yaml   # 系统配置"
 echo ""

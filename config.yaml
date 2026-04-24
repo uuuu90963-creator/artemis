@@ -1,51 +1,39 @@
-name: artemis
-version: 0.1.0
-
-# API Keys - 实际存储在 ~/.hermes/.env 文件中
-# 支持的 Provider:
-#   - minimax: MiniMax 国内版 (abab6.5s-chat)
-#   - openrouter: OpenRouter (GPT-4o-mini/Claude/Gemini 等，按量计费)
-#   - deepseek: DeepSeek (deepseek-chat)
-#   - anthropic: Anthropic Claude (Claude-3.5-Haiku/Sonnet/Opus)
-#   - google: Google Gemini (gemini-2.0-flash 等)
-#
-# .env 文件格式示例:
-#   MINIMAX_API_KEY=your_key_here
-#   OPENROUTER_API_KEY=sk-or-v1_xxx
-#   DEEPSEEK_API_KEY=sk-xxx
-#   ANTHROPIC_API_KEY=sk-ant-api03-xxx
-#   GEMINI_API_KEY=AIzaxxx
-#   TELEGRAM_BOT_TOKEN=123456:ABC-DEFxxx
-
-# 路由策略
+_schema_version: 1
+model:
+  text: minimax:abab6.5s-chat
+  vision: openrouter:openai/gpt-4o-mini
+  reasoning: openrouter:openai/gpt-4o-mini
 routing:
-  # 文字任务默认用 MiniMax
   text_default: minimax
-  # 视觉任务用双通道
-  vision_primary: openrouter   # gpt-4o-mini 做精细分析
-  vision_fallback: local       # 本地ollama快速兜底
-  # 升级阈值
-  upgrade_threshold: medium     # simple/medium/complex/critical
-
-# 记忆配置
+  vision_primary: openrouter
+  vision_fallback: local
+tools:
+  enabled_toolsets:
+  - file
+  - memory
+  - web
+  disabled_tools: []
+  max_file_size_mb: 10
+  terminal_timeout: 60
 memory:
-  type: sqlite               # sqlite + 内置向量（不用外部向量库）
-  path: memories/memory.db
-  embedding_model: text-embedding-3-small  # 或MiniMax的embedding
-  max_entries: 10000
-
-# 技能配置
-skills:
-  directory: skills
-  marketplace: https://artemis-skills.market
-
-# 进化配置
-evolution:
-  enabled: true
-  反思_after_tasks: 3          # 每N个任务后反思一次
-  log_dir: logs/evolution
-
-# 工作空间
-workspace:
-  path: workspace
-  agents_md: AGENTS.md
+  db_path: ~/.hermes/artemis/memories/memory.db
+  max_memories: 10000
+  similarity_threshold: 0.01
+telegram:
+  enabled: false
+  allowed_users: []
+  reply_to_message: true
+  streaming: false
+agent:
+  max_turns: 20
+  max_tokens_per_message: 500
+  context_window: 128000
+  auto_save: true
+security:
+  approve_all: false
+  block_high_danger: true
+  dangerous_commands_log: ~/.hermes/artemis/logs/commands.log
+display:
+  show_cost: true
+  show_provider: true
+  show_thinking: false

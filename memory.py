@@ -96,7 +96,7 @@ class MemoryStore:
         words.extend(english_words)
         
         # 中文字符（简单处理）
-        chinese_chars = re.findall(r'[\u4e00-\u9fff]', text)
+        chinese_chars = re.findall(r'[\u4e00-\u9fff]+', text)  # 连续中文字符作为一个词
         words.extend(chinese_chars)
         
         # 计算词频
@@ -180,7 +180,8 @@ class MemoryStore:
         cursor = self.conn.cursor()
         for term in terms:
             cursor.execute(
-                "INSERT OR IGNORE INTO vocabulary (term, df) VALUES (?, 1)"
+                "INSERT OR IGNORE INTO vocabulary (term, df) VALUES (?, 1)",
+                (term,)
             )
             cursor.execute(
                 "UPDATE vocabulary SET df = df + 1 WHERE term = ?",
