@@ -197,31 +197,139 @@ class ArtemisTelegramBot:
         """同步发送 API 请求（用于线程池）"""
         with httpx.Client(timeout=30.0) as client:
             response = client.post(f"{self.api_url}{method}", json=params)
-            response.raise_for_status()
-            return response.json()
-    
     async def send_message(self, chat_id: int, text: str,
                           parse_mode: str = "Markdown",
                           reply_to_message_id: Optional[int] = None) -> Dict:
-        """发送消息"""
-        # 清理 MiniMax 返回的<think>标签
+        """
+        发送消息（自动拆分超长内容）
+
+        Telegram sendMessage 上限 4096 字符，超过自动拆分多消息发送。
+        代码块优先单独成一条，避免被 Markdown 格式截断。
+        """
         import re
+
+        # 清理 MiniMax 返回的<think>标签
         cleaned_text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL).strip()
         if not cleaned_text:
             cleaned_text = "(无实质内容)"
 
-        # Telegram Markdown 对 <> 敏感，先转义
-        escaped_text = cleaned_text.replace("<", "＜").replace(">", "＞")
+        MAX_LEN = 4096
 
-        params = {
-            "chat_id": chat_id,
-            "text": escaped_text,
-            "parse_mode": parse_mode,
-        }
-        if reply_to_message_id:
-            params["reply_to_message_id"] = reply_to_message_id
-        return await self._make_request("sendMessage", **params)
-    
+        if len(cleaned_text) <= MAX_LEN:
+            escaped_text = cleaned_text.replace("<", "＜").replace(">", "＞")
+            params = {
+                "chat_id": chat_id,
+                "text": escaped_text,
+                "parse_mode": parse_mode,
+            }
+            if reply_to_message_id:
+                params["reply_to_message_id"] = reply_to_message_id
+            return await self._make_request("sendMessage", **params)
+
+        # ===== 超长消息自动拆分 =====
+        parts = self._split_long_text(cleaned_text, max_len=MAX_LEN)
+        print(f"[Telegram Bot] 消息超长({len(cleaned_text)}字符)，拆分为 {len(parts)} 段发送")
+
+        results = []
+        for i, part in enumerate(parts):
+            escaped_part = part.replace("<", "＜").replace(">", "＞")
+            params = {
+                "chat_id": chat_id,
+                "text": escaped_part,
+                "parse_mode": parse_mode,
+            }
+            if reply_to_message_id and i == 0:
+                params["reply_to_message_id"] = reply_to_message_id
+
+            try:
+                result = await self._make_request("sendMessage", **params)
+                results.append(result)
+            except Exception as e:
+                print(f"[Telegram Bot] 第{i+1}/{len(parts)}条发送失败: {e}，尝试纯文本模式")
+                params["parse_mode"] = None
+                try:
+                    result = await self._make_request("sendMessage", **params)
+                    results.append(result)
+                except Exception as e2:
+                    print(f"[Telegram Bot] 降级发送也失败: {e2}")
+                    results.append({"ok": False, "error": str(e2)})
+
+            if i < len(parts) - 1:
+                await asyncio.sleep(1.0)
+
+        return results[-1] if results else {"ok": False, "error": "no parts sent"}
+
+    def _split_long_text(self, text: str, max_len: int = 4096) -> list:
+        """
+        智能拆分超长文本，优先保留代码块格式。
+        策略：
+        1. 代码块（```...```）优先单独成一条
+        2. 普通段落按换行符拆分
+        3. 超长单行内部截断
+        """
+        parts = []
+        remainder = text
+
+        while len(remainder) > max_len:
+            cb_start = remainder.find("```")
+            if cb_start == -1 or cb_start > max_len:
+                break
+
+            before = remainder[:cb_start].rstrip("\n")
+            if before:
+                if len(before) <= max_len:
+                    parts.append(before)
+                else:
+                    parts.extend(self._split_by_lines(before, max_len))
+
+            cb_end = remainder.find("```", cb_start + 3)
+            if cb_end == -1 or cb_end > max_len + 3:
+                code_block = remainder[cb_start:cb_start + max_len] if cb_end == -1 else remainder[cb_start:cb_end + 3]
+                parts.extend(self._split_by_lines(code_block, max_len))
+                remainder = ""
+                break
+
+            code_block = remainder[cb_start:cb_end + 3]
+            remainder = remainder[cb_end + 3:]
+
+            if len(code_block) <= max_len:
+                parts.append(code_block)
+            else:
+                parts.extend(self._split_by_lines(code_block, max_len))
+
+        if remainder.strip():
+            if len(remainder) <= max_len:
+                parts.append(remainder.strip())
+            else:
+                parts.extend(self._split_by_lines(remainder.strip(), max_len))
+
+        return parts if parts else [text[:max_len]]
+
+    def _split_by_lines(self, text: str, max_len: int) -> list:
+        """按换行符拆分，保留每行完整，单行超长则强制截断"""
+        lines = text.split("\n")
+        chunks = []
+        current = ""
+
+        for line in lines:
+            if len(current) + len(line) + 1 <= max_len:
+                current = (current + "\n" + line).strip()
+            else:
+                if current:
+                    chunks.append(current)
+                if len(line) > max_len:
+                    for i in range(0, len(line), max_len):
+                        chunks.append(line[i:i + max_len])
+                    current = ""
+                else:
+                    current = line
+
+        if current.strip():
+            chunks.append(current.strip())
+
+        return chunks
+
+
     async def send_photo(self, chat_id: int, photo: str, caption: Optional[str] = None,
                         parse_mode: str = "Markdown") -> Dict:
         """发送图片"""
