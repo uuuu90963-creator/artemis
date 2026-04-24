@@ -31,14 +31,12 @@ if ENV_PATH.exists():
                 k, v = line.split("=", 1)
                 os.environ[k.strip()] = v.strip()
 
-# 获取 Token
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
-if not TELEGRAM_BOT_TOKEN:
-    print("[Telegram Bot] 错误: 未设置 TELEGRAM_BOT_TOKEN")
-    print("请在 ~/.hermes/.env 中添加: TELEGRAM_BOT_TOKEN=your_token_here")
-    sys.exit(1)
+# 获取 Token（懒加载，不存在时返回空）
+def _get_token() -> str:
+    return os.getenv("TELEGRAM_BOT_TOKEN", "")
 
-TELEGRAM_API_URL = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/"
+TELEGRAM_BOT_TOKEN = _get_token()
+TELEGRAM_API_URL = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/" if TELEGRAM_BOT_TOKEN else ""
 
 # 允许的用户 ID（可选的访问控制）
 ALLOWED_USERS = os.getenv("TELEGRAM_ALLOWED_USERS", "")
@@ -46,7 +44,6 @@ if ALLOWED_USERS:
     ALLOWED_USERS = set(int(uid) for uid in ALLOWED_USERS.split(",") if uid.strip())
 else:
     ALLOWED_USERS = None
-
 
 class ConversationDB:
     """对话历史数据库"""
@@ -86,51 +83,64 @@ class ConversationDB:
         if not tables:
             raise RuntimeError(f"数据库表创建失败: {self.db_path}")
     
-    def add_message(self, chat_id: int, role: str, content: str, 
+    def add_message(self, chat_id: int, role: str, content: str,
                     image_path: Optional[str] = None, message_id: Optional[int] = None):
         """添加消息"""
-        conn = sqlite3.connect(self.db_path)
-        c = conn.cursor()
-        c.execute("""
-            INSERT INTO conversations (chat_id, role, content, image_path, message_id)
-            VALUES (?, ?, ?, ?, ?)
-        """, (chat_id, role, content, image_path, message_id))
-        conn.commit()
-        conn.close()
-    
+        try:
+            conn = sqlite3.connect(self.db_path)
+            c = conn.cursor()
+            c.execute("""
+                INSERT INTO conversations (chat_id, role, content, image_path, message_id)
+                VALUES (?, ?, ?, ?, ?)
+            """, (chat_id, role, content, image_path, message_id))
+            conn.commit()
+            conn.close()
+        except sqlite3.Error as e:
+            print(f"[Telegram Bot] 数据库写入错误: {e}")
+
     def get_history(self, chat_id: int, limit: int = 20) -> List[Dict]:
         """获取对话历史"""
-        conn = sqlite3.connect(self.db_path)
-        c = conn.cursor()
-        c.execute("""
-            SELECT role, content, timestamp, image_path 
-            FROM conversations 
-            WHERE chat_id = ? 
-            ORDER BY timestamp DESC 
-            LIMIT ?
-        """, (chat_id, limit))
-        rows = c.fetchall()
-        conn.close()
-        # 反转使按时间正序
-        return [{"role": r[0], "content": r[1], "timestamp": r[2], "image_path": r[3]} 
-                for r in reversed(rows)]
-    
+        try:
+            conn = sqlite3.connect(self.db_path)
+            c = conn.cursor()
+            c.execute("""
+                SELECT role, content, timestamp, image_path
+                FROM conversations
+                WHERE chat_id = ?
+                ORDER BY timestamp DESC
+                LIMIT ?
+            """, (chat_id, limit))
+            rows = c.fetchall()
+            conn.close()
+            return [{"role": r[0], "content": r[1], "timestamp": r[2], "image_path": r[3]}
+                    for r in reversed(rows)]
+        except sqlite3.Error as e:
+            print(f"[Telegram Bot] 数据库读取错误: {e}")
+            return []
+
     def clear_history(self, chat_id: int):
         """清空对话历史"""
-        conn = sqlite3.connect(self.db_path)
-        c = conn.cursor()
-        c.execute("DELETE FROM conversations WHERE chat_id = ?", (chat_id,))
-        conn.commit()
-        conn.close()
-    
+        try:
+            conn = sqlite3.connect(self.db_path)
+            c = conn.cursor()
+            c.execute("DELETE FROM conversations WHERE chat_id = ?", (chat_id,))
+            conn.commit()
+            conn.close()
+        except sqlite3.Error as e:
+            print(f"[Telegram Bot] 数据库清空错误: {e}")
+
     def count(self, chat_id: int) -> int:
         """统计消息数"""
-        conn = sqlite3.connect(self.db_path)
-        c = conn.cursor()
-        c.execute("SELECT COUNT(*) FROM conversations WHERE chat_id = ?", (chat_id,))
-        count = c.fetchone()[0]
-        conn.close()
-        return count
+        try:
+            conn = sqlite3.connect(self.db_path)
+            c = conn.cursor()
+            c.execute("SELECT COUNT(*) FROM conversations WHERE chat_id = ?", (chat_id,))
+            count = c.fetchone()[0]
+            conn.close()
+            return count
+        except sqlite3.Error as e:
+            print(f"[Telegram Bot] 数据库统计错误: {e}")
+            return 0
 
 
 class ArtemisTelegramBot:
@@ -564,7 +574,13 @@ def main():
     print("=" * 50)
     print(" Artemis Telegram Bot ")
     print("=" * 50)
-    
+
+    # 检查 Token
+    if not TELEGRAM_BOT_TOKEN:
+        print("[错误] 未设置 TELEGRAM_BOT_TOKEN")
+        print("请在 ~/.hermes/.env 中添加: TELEGRAM_BOT_TOKEN=your_token_here")
+        sys.exit(1)
+
     # 尝试导入 Artemis
     agent = None
     try:

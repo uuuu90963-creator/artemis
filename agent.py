@@ -467,7 +467,7 @@ class ArtemisAgent:
                 prompt=None,  # 不用了，用 messages
                 provider=provider,
                 model=model,
-                image=image if total_turns == 1 else None,
+                image=processed_image if total_turns == 1 else None,  # 用处理后的图片
                 system_prompt=None,  # 不用，用 messages
                 messages=messages,  # 新参数
                 tools=tools if total_turns == 1 else None,  # 只有第一轮给工具
