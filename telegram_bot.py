@@ -55,7 +55,7 @@ class ConversationDB:
         self.db_path = db_path
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
-    
+
     def _init_db(self):
         """初始化数据库"""
         conn = sqlite3.connect(self.db_path)
@@ -79,6 +79,12 @@ class ConversationDB:
         """)
         conn.commit()
         conn.close()
+        # 验证表是否创建成功
+        conn = sqlite3.connect(self.db_path)
+        tables = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='conversations'").fetchall()
+        conn.close()
+        if not tables:
+            raise RuntimeError(f"数据库表创建失败: {self.db_path}")
     
     def add_message(self, chat_id: int, role: str, content: str, 
                     image_path: Optional[str] = None, message_id: Optional[int] = None):
@@ -178,9 +184,14 @@ class ArtemisTelegramBot:
                           parse_mode: str = "Markdown",
                           reply_to_message_id: Optional[int] = None) -> Dict:
         """发送消息"""
+        # 清理 MiniMax 返回的<think>标签
+        import re
+        cleaned_text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL).strip()
+        if not cleaned_text:
+            cleaned_text = "(无实质内容)"
+
         # Telegram Markdown 对 <> 敏感，先转义
-        # 替换 < > 为全角符号避免被解析为 HTML
-        escaped_text = text.replace("<", "＜").replace(">", "＞")
+        escaped_text = cleaned_text.replace("<", "＜").replace(">", "＞")
 
         params = {
             "chat_id": chat_id,
