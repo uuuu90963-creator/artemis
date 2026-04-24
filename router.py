@@ -34,22 +34,45 @@ class TaskRouter:
     决定每个任务使用哪个 Provider 和模型
     """
     
-    # Provider 配置
+    # Provider 配置（与 llm.py 保持一致）
     PROVIDERS = {
         "minimax": {
-            "models": ["MiniMax-Text-01"],
+            "models": ["abab6.5s-chat", "abab6.5-chat", "gemma-7b"],
             "strengths": ["中文", "快速", "成本低"],
-            "cost_tier": 1
+            "cost_tier": 1,
+            "supports_vision": False,
         },
         "openrouter": {
-            "models": ["gpt-4o-mini", "claude-3.5-sonnet", "gpt-4o"],
+            "models": ["openai/gpt-4o-mini", "openai/gpt-4o", "anthropic/claude-3-haiku",
+                       "deepseek/deepseek-chat-v3-0324", "google/gemini-2.0-flash"],
             "strengths": ["通用", "视觉", "复杂推理"],
-            "cost_tier": 2
+            "cost_tier": 2,
+            "supports_vision": True,
+        },
+        "deepseek": {
+            "models": ["deepseek-chat", "deepseek-coder"],
+            "strengths": ["编程", "推理", "成本低"],
+            "cost_tier": 1,
+            "supports_vision": False,
+        },
+        "anthropic": {
+            "models": ["claude-3-5-haiku-20241107", "claude-3-opus-4-5-20241120",
+                       "claude-3-sonnet-4-20250514"],
+            "strengths": ["复杂推理", "视觉", "精确"],
+            "cost_tier": 3,
+            "supports_vision": True,
+        },
+        "google": {
+            "models": ["gemini-2.0-flash", "gemini-1.5-pro", "gemini-1.5-flash"],
+            "strengths": ["多模态", "快速", "免费额度"],
+            "cost_tier": 1,
+            "supports_vision": True,
         },
         "local": {
             "models": ["llama3.2-vision", "qwen2.5"],
             "strengths": ["本地", "快速", "隐私"],
-            "cost_tier": 1
+            "cost_tier": 1,
+            "supports_vision": True,
         }
     }
     
@@ -205,8 +228,8 @@ class TaskRouter:
         # 复杂推理
         if task_type == TaskType.TEXT_COMPLEX.value:
             if complexity == Complexity.CRITICAL.value:
-                return "openrouter:gpt-4o"
-            return "openrouter:claude-3.5-sonnet"
+                return "openrouter"  # 模型由 llm.py 的 DEFAULT_MODELS 决定
+            return "openrouter"  # claude-3-haiku from openrouter
         
         # 医学问题 - 复杂但用 MiniMax + skill
         if task_type == TaskType.MEDICAL.value:
@@ -216,7 +239,7 @@ class TaskRouter:
         if task_type == TaskType.CODE.value:
             if complexity in [Complexity.SIMPLE.value, Complexity.MEDIUM.value]:
                 return self.text_default
-            return "openrouter:claude-3.5-sonnet"
+            return "deepseek"  # deepseek-coder is good for complex code
         
         # 默认
         return self.text_default

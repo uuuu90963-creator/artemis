@@ -111,8 +111,14 @@ class Artemis:
         # 初始化记忆系统
         db_path = BASE_DIR / self.config["memory"]["path"]
         db_path.parent.mkdir(parents=True, exist_ok=True)
-        self.memory = MemoryStore(db_path)
-        print(f"[Artemis] ✓ 记忆系统就绪 ({self.memory.count()} 条记忆)")
+        try:
+            self.memory = MemoryStore(db_path)
+            print(f"[Artemis] ✓ 记忆系统就绪 ({self.memory.count()} 条记忆)")
+        except Exception as e:
+            print(f"[Artemis] ⚠ 记忆系统初始化失败: {e}")
+            # Create in-memory fallback
+            from memory import MemoryStore
+            self.memory = MemoryStore(Path("/tmp/artemis_memory_fallback.db"))
         
         # 初始化路由系统
         self.router = TaskRouter(self.config)
@@ -138,9 +144,13 @@ class Artemis:
         
         # 初始化定时任务调度器
         cron_db = BASE_DIR / "memories" / "cron.db"
-        self.cron = CronScheduler(agent=self, db_path=cron_db)
-        jobs = self.cron.list_jobs()
-        print(f"[Artemis] ✓ Cron 调度器就绪 ({len(jobs)} 个任务)")
+        try:
+            self.cron = CronScheduler(agent=self, db_path=cron_db)
+            jobs = self.cron.list_jobs()
+            print(f"[Artemis] ✓ Cron 调度器就绪 ({len(jobs)} 个任务)")
+        except Exception as e:
+            print(f"[Artemis] ⚠ Cron 调度器初始化失败: {e}")
+            self.cron = None
         
         # 初始化 MCP 插件管理器
         plugins_dir = BASE_DIR / "plugins"
