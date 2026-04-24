@@ -541,44 +541,61 @@ class ArtemisTelegramBot:
                 print(f"[Telegram Bot] 发送消息失败: {e}")
                 await self.send_message(chat_id, f"发送失败: {str(e)[:100]}")
     
-    async def handle_photo(self, chat_id: int, photos: List, caption: str, 
+    async def handle_photo(self, chat_id: int, photos: List, caption: str,
                           message_id: int) -> str:
         """处理图片消息"""
         if not photos:
             return "未收到图片"
-        
+
         # 获取最大尺寸的图片
         photo = photos[-1]
         file_id = photo.get("file_id")
-        
+
         if not file_id:
             return "无法获取图片"
-        
+
+        print(f"[Telegram Bot] 收到图片: file_id={file_id[:20]}..., caption={caption[:50] if caption else '(无)'}")
+
         # 下载图片
         try:
             file_path = await self.get_file(file_id)
             if not file_path:
                 return "无法获取文件路径"
-            
+
             # 生成保存路径
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             dest_path = CACHE_DIR / f"{chat_id}_{timestamp}.jpg"
-            
+            dest_path.parent.mkdir(parents=True, exist_ok=True)
+
             # 在线程池中下载
             loop = asyncio.get_event_loop()
             saved_path = await loop.run_in_executor(
                 self.executor, self.download_file, file_path, dest_path
             )
-            
+
+            print(f"[Telegram Bot] 图片已保存: {saved_path} (存在={Path(saved_path).exists()})")
+
             # 处理图片
             if self.agent:
-                response = self.agent.chat(caption or "请分析这张图片", image=str(saved_path))
+                prompt = caption or "请分析这张图片"
+                print(f"[Telegram Bot] 调用 agent.chat(image={saved_path}, prompt={prompt[:30]})")
+
+                # 检查 agent 是否有 vision
+                has_vision = (getattr(self.agent, 'vision', None) is not None)
+                print(f"[Telegram Bot] Agent vision: {has_vision}")
+
+                response = self.agent.chat(prompt, image=str(saved_path))
+
+                print(f"[Telegram Bot] agent.chat 完成: success={response.get('success', 'N/A')}")
             else:
                 response = f"[模拟] 已收到图片: {saved_path.name}"
-            
+
             return response
-            
+
         except Exception as e:
+            import traceback
+            print(f"[Telegram Bot] handle_photo 异常: {e}")
+            traceback.print_exc()
             return f"处理图片失败: {str(e)}"
     
     async def get_updates(self) -> List[Dict]:
@@ -673,8 +690,23 @@ def main():
         agent = Artemis()
         agent.initialize()
         print(f"[Telegram Bot] ✓ Artemis 已加载")
+
+        # Vision 诊断
+        if agent.vision:
+            cfg = agent.vision.config
+            print(f"[Telegram Bot]   Vision: Ollama={'可用' if cfg.ollama_available else '不可用'}, "
+                  f"OpenRouter={'有Key' if cfg.openrouter_api_key else '无Key'}")
+        else:
+            print("[Telegram Bot]   Vision: 未初始化（图片分析不可用）")
+
+        if agent.agent and hasattr(agent.agent, 'vision') and agent.agent.vision:
+            v = agent.agent.vision.config
+            print(f"[Telegram Bot]   Agent.Vision: Ollama={'可用' if v.ollama_available else '不可用'}, "
+                  f"OpenRouter={'有Key' if v.openrouter_api_key else '无Key'}")
     except Exception as e:
+        import traceback
         print(f"[Telegram Bot] ⚠ 无法加载 Artemis: {e}")
+        traceback.print_exc()
         print("[Telegram Bot] 以模拟模式运行")
     
     # 启动 Bot

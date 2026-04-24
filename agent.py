@@ -225,9 +225,11 @@ class ArtemisAgent:
         elif HAS_VISION and vision_engine is not False:
             try:
                 self.vision = create_vision_engine()
-                print(f"[Agent] ✓ 视觉引擎已初始化 (Ollama: {'可用' if self.vision.config.ollama_available else '不可用'})")
+                print(f"[Agent] ✓ 视觉引擎已初始化 (Ollama: {'可用' if self.vision.config.ollama_available else '不可用'}, OpenRouter: {'有Key' if self.vision.config.openrouter_api_key else '无Key'})")
             except Exception as e:
                 print(f"[Agent] ⚠ 视觉引擎初始化失败: {e}")
+                import traceback
+                traceback.print_exc()
                 self.vision = None
         else:
             self.vision = None
