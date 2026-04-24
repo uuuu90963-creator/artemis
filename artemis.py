@@ -89,8 +89,8 @@ class Artemis:
                 },
                 "evolution": {
                     "enabled": True,
-                    "反思_after_tasks": 3,
-                    "log_dir": "logs/evolution"
+                    "反思_after_tasks": 3,          # 每N个任务后反思一次
+                    "log_dir": "logs/evolution"      # 相对 BASE_DIR
                 },
                 "workspace": {
                     "path": "workspace",

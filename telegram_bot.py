@@ -174,13 +174,17 @@ class ArtemisTelegramBot:
             response.raise_for_status()
             return response.json()
     
-    async def send_message(self, chat_id: int, text: str, 
-                          parse_mode: str = "Markdown", 
+    async def send_message(self, chat_id: int, text: str,
+                          parse_mode: str = "Markdown",
                           reply_to_message_id: Optional[int] = None) -> Dict:
         """发送消息"""
+        # Telegram Markdown 对 <> 敏感，先转义
+        # 替换 < > 为全角符号避免被解析为 HTML
+        escaped_text = text.replace("<", "＜").replace(">", "＞")
+
         params = {
             "chat_id": chat_id,
-            "text": text,
+            "text": escaped_text,
             "parse_mode": parse_mode,
         }
         if reply_to_message_id:
