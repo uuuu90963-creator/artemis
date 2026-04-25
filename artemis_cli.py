@@ -115,9 +115,10 @@ def cmd_run(args):
 
     agent = Artemis()
     print(f"> {args.task}", flush=True)
-    result = agent.run_task(args.task)
+    result = agent.run_task({"content": args.task})
     print()
-    print(result.get("content", result.get("error", "完成")))
+    content = result.get("content", "")
+    print(content if content else "完成")
 
 
 def cmd_approval(args):
