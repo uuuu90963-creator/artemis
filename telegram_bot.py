@@ -178,6 +178,7 @@ class ArtemisTelegramBot:
             ("skills", "查看技能"),
             ("model", "切换模型"),
             ("vision", "图片分析"),
+            ("health", "健康检查"),
         ]
     
     def _is_allowed(self, chat_id: int) -> bool:
@@ -198,7 +199,7 @@ class ArtemisTelegramBot:
         with httpx.Client(timeout=30.0) as client:
             response = client.post(f"{self.api_url}{method}", json=params)
     async def send_message(self, chat_id: int, text: str,
-                          parse_mode: str = "Markdown",
+                          parse_mode: str = "",
                           reply_to_message_id: Optional[int] = None) -> Dict:
         """
         发送消息（自动拆分超长内容）
@@ -224,7 +225,15 @@ class ArtemisTelegramBot:
             }
             if reply_to_message_id:
                 params["reply_to_message_id"] = reply_to_message_id
-            return await self._make_request("sendMessage", **params)
+            try:
+                return await self._make_request("sendMessage", **params)
+            except Exception as e:
+                # Markdown 发送失败时降级为纯文本
+                if parse_mode:
+                    print(f"[Telegram Bot] Markdown发送失败: {e}，尝试纯文本")
+                    params["parse_mode"] = None
+                    return await self._make_request("sendMessage", **params)
+                raise
 
         # ===== 超长消息自动拆分 =====
         parts = self._split_long_text(cleaned_text, max_len=MAX_LEN)
@@ -406,6 +415,8 @@ class ArtemisTelegramBot:
         elif command == "artemis":
             # /artemis 开头的消息，后面内容当普通消息处理
             return None  # 交给普通消息处理
+        elif command == "health":
+            return await self.cmd_health()
         else:
             return f"未知命令: /{command}\n\n发送 /help 查看可用命令。"
     
@@ -423,6 +434,7 @@ class ArtemisTelegramBot:
 • `/skills` - 查看可用技能
 • `/model <name>` - 切换模型 (minimax/openrouter/deepseek)
 • `/vision` - 分析图片
+• `/health` - 健康检查
 • `/upgrade` - 检查/执行版本升级
 
 **使用方式：**
@@ -432,7 +444,32 @@ class ArtemisTelegramBot:
 
 有什么我可以帮您的吗？ 🌟
 """.strip()
-    
+
+    async def cmd_health(self) -> str:
+        """健康检查：测试所有 LLM provider 连接状态"""
+        if not hasattr(self, "artemis") or self.artemis is None:
+            return "⚠️ Artemis 未初始化，无法执行健康检查。"
+
+        health = self.artemis.llm.health_check()
+
+        lines = ["🩺 **健康检查结果**\n"]
+        any_available = False
+        for provider, status in health.items():
+            if status["available"]:
+                any_available = True
+                latency = status.get("latency_ms")
+                emoji = "✅"
+                detail = f" {latency}ms" if latency else ""
+            else:
+                emoji = "❌"
+                detail = f" {status.get('error', 'unknown')}"
+            lines.append(f"{emoji} **{provider}**{detail}")
+
+        if not any_available:
+            lines.append("\n⚠️ 没有可用的 LLM Provider，请检查 .env 配置。")
+
+        return "\n".join(lines)
+
     def cmd_help(self) -> str:
         """帮助信息"""
         return """
@@ -819,6 +856,16 @@ def main():
             v = agent.agent.vision.config
             print(f"[Telegram Bot]   Agent.Vision: Ollama={'可用' if v.ollama_available else '不可用'}, "
                   f"OpenRouter={'有Key' if v.openrouter_api_key else '无Key'}")
+
+        # 启动时健康检查
+        print("[Telegram Bot] 🩺 运行启动健康检查...")
+        health = agent.llm.health_check()
+        available_providers = [p for p, s in health.items() if s["available"]]
+        if available_providers:
+            print(f"[Telegram Bot]   ✅ 可用 Provider: {', '.join(available_providers)}")
+        else:
+            print("[Telegram Bot]   ⚠️  没有可用的 LLM Provider，Bot 可运行但 AI 对话不可用")
+            print("[Telegram Bot]   请在 .env 中配置 API Key")
     except Exception as e:
         import traceback
         print(f"[Telegram Bot] ⚠ 无法加载 Artemis: {e}")

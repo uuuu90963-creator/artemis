@@ -5,9 +5,13 @@ Artemis LLM Client - Multi-model LLM client supporting MiniMax, OpenRouter, Deep
 import os
 import json
 import base64
+import time
+import logging
 import httpx
 from typing import Dict, Any, Optional, List, Iterator
 from datetime import datetime
+
+logger = logging.getLogger("artemis.llm")
 
 # Provider configurations
 PROVIDERS = {
@@ -381,6 +385,135 @@ class LLMClient:
         else:
             return "/chat/completions"
     
+    def _chat_with_retry(
+        self,
+        provider: str,
+        model: str,
+        payload: Dict[str, Any],
+        headers: Dict[str, str],
+    ) -> Dict[str, Any]:
+        """
+        Execute chat request with retry (3次指数退避)。
+        适用于所有 provider。
+        """
+        max_retries = 3
+        last_error = None
+
+        for attempt in range(max_retries):
+            try:
+                client = self.clients[provider]
+                endpoint = self._get_endpoint(provider, model)
+                url = endpoint
+
+                if provider == "google":
+                    api_key = self.api_keys.get("google", "")
+                    url = f"{client.base_url}{endpoint}?key={api_key}"
+                    response = client.post(url, json=payload, headers=headers)
+                else:
+                    response = client.post(url, json=payload, headers=headers)
+
+                # 5xx / 429 / 超时 → 重试
+                if response.status_code >= 500 or response.status_code == 429:
+                    wait_time = (2 ** attempt) * 1.5
+                    logger.info(
+                        "Provider %s HTTP %d，重试 %d/%d，等待 %.1fs",
+                        provider, response.status_code, attempt + 1, max_retries, wait_time
+                    )
+                    time.sleep(wait_time)
+                    last_error = f"HTTP {response.status_code}"
+                    continue
+
+                # 4xx (非429) → 不重试，直接失败
+                if response.status_code == 400:
+                    return {
+                        "success": False,
+                        "content": "",
+                        "provider": provider,
+                        "model": model,
+                        "usage": {},
+                        "error": f"Bad request (400): {response.text[:200]}",
+                    }
+
+                if response.status_code != 200:
+                    return {
+                        "success": False,
+                        "content": "",
+                        "provider": provider,
+                        "model": model,
+                        "usage": {},
+                        "error": f"HTTP {response.status_code}: {response.text[:200]}",
+                    }
+
+                # 成功解析响应
+                return self._parse_response(provider, model, response.json())
+
+            except httpx.TimeoutException:
+                wait_time = (2 ** attempt) * 1.5
+                logger.info("Provider %s 超时，重试 %d/%d，等待 %.1fs",
+                            provider, attempt + 1, max_retries, wait_time)
+                time.sleep(wait_time)
+                last_error = "Timeout"
+                continue
+            except Exception as e:
+                last_error = str(e)
+                break
+
+        # 全部重试均失败
+        return {
+            "success": False,
+            "content": "",
+            "provider": provider,
+            "model": model,
+            "usage": {},
+            "error": f"Request failed after {max_retries} retries: {last_error}",
+        }
+
+    def _parse_response(self, provider: str, model: str, data: Dict) -> Dict[str, Any]:
+        """解析 provider 响应"""
+        content = ""
+        usage = {}
+        message_data = {}
+        tool_calls_result = []
+
+        if provider == "anthropic":
+            content = data.get("content", [{}])[0].get("text", "")
+            usage = {
+                "input_tokens": data.get("usage", {}).get("input_tokens", 0),
+                "output_tokens": data.get("usage", {}).get("output_tokens", 0),
+            }
+            for block in data.get("content", []):
+                if block.get("type") == "tool_use":
+                    tool_calls_result.append({
+                        "id": block.get("id", ""),
+                        "name": block.get("name", ""),
+                        "arguments": block.get("input", {}),
+                    })
+        elif provider == "google":
+            content = data.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "")
+            usage = {
+                "prompt_tokens": data.get("usageMetadata", {}).get("promptTokenCount", 0),
+                "completion_tokens": data.get("usageMetadata", {}).get("candidatesTokenCount", 0),
+                "total_tokens": data.get("usageMetadata", {}).get("totalTokenCount", 0),
+            }
+        else:
+            # OpenAI-compatible
+            choice = data.get("choices", [{}])[0]
+            message = choice.get("message", {})
+            content = message.get("content", "")
+            usage = data.get("usage", {})
+            message_data = message
+            tool_calls_result = message.get("tool_calls", [])
+
+        return {
+            "success": True,
+            "content": content,
+            "provider": provider,
+            "model": model,
+            "usage": usage,
+            "tool_calls": tool_calls_result,
+            "message_data": message_data,
+        }
+
     def chat(
         self,
         prompt: str = None,
@@ -389,8 +522,9 @@ class LLMClient:
         image: Optional[str] = None,
         system_prompt: Optional[str] = None,
         stream: bool = False,
-        messages: List[Dict] = None,  # NEW: pre-built messages (takes precedence over prompt)
-        tools: List[Dict] = None,      # NEW: function calling tools
+        messages: List[Dict] = None,
+        tools: List[Dict] = None,
+        _fallback: bool = False,  # 内部标志：是否处于 fallback 模式
     ) -> Dict[str, Any]:
         """
         Unified chat interface.
@@ -526,108 +660,46 @@ class LLMClient:
                     payload["tool_choice"] = "auto"
             
             # NOTE: streaming not yet implemented - always False
-            # TODO: use httpx.AsyncClient + stream=True for real streaming
             payload["stream"] = False
-            
-            # Get headers and endpoint
+
+            # Get headers
             headers = self._get_headers(provider)
-            endpoint = self._get_endpoint(provider, model)
-            
-            # Build URL
-            url = endpoint
-            if provider == "google":
-                url = f"/v1beta/{endpoint}"
-            
-            # Make request
-            client = self.clients[provider]
-            
-            # Special handling for Google API key
-            if provider == "google":
-                api_key = self.api_keys.get("google", "")
-                url = f"{client.base_url}{endpoint}?key={api_key}"
-                response = client.post(url, json=payload, headers=headers)
-            else:
-                response = client.post(url, json=payload, headers=headers)
-            
-            # Handle response
-            if response.status_code == 429:
-                return {
-                    "success": False,
-                    "content": "",
-                    "provider": provider,
-                    "model": model,
-                    "usage": {},
-                    "error": "Rate limit exceeded (429). Please try again later.",
-                }
-            
-            if response.status_code == 400:
-                return {
-                    "success": False,
-                    "content": "",
-                    "provider": provider,
-                    "model": model,
-                    "usage": {},
-                    "error": f"Bad request (400): {response.text}",
-                }
-            
-            if response.status_code != 200:
-                return {
-                    "success": False,
-                    "content": "",
-                    "provider": provider,
-                    "model": model,
-                    "usage": {},
-                    "error": f"HTTP {response.status_code}: {response.text}",
-                }
-            
-            # Parse response based on provider
-            data = response.json()
-            content = ""
-            usage = {}
-            message_data = {}
-            tool_calls_result = []
-            
-            if provider == "anthropic":
-                content = data.get("content", [{}])[0].get("text", "")
-                usage = {
-                    "input_tokens": data.get("usage", {}).get("input_tokens", 0),
-                    "output_tokens": data.get("usage", {}).get("output_tokens", 0),
-                }
-                # Anthropic tool use format
-                for block in data.get("content", []):
-                    if block.get("type") == "tool_use":
-                        tool_calls_result.append({
-                            "id": block.get("id", ""),
-                            "name": block.get("name", ""),
-                            "arguments": block.get("input", {}),
-                        })
-            elif provider == "google":
-                content = data.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "")
-                usage = {
-                    "prompt_tokens": data.get("usageMetadata", {}).get("promptTokenCount", 0),
-                    "completion_tokens": data.get("usageMetadata", {}).get("candidatesTokenCount", 0),
-                    "total_tokens": data.get("usageMetadata", {}).get("totalTokenCount", 0),
-                }
-            else:
-                # OpenAI-compatible format (OpenRouter, DeepSeek, MiniMax)
-                choice = data.get("choices", [{}])[0]
-                message = choice.get("message", {})
-                content = message.get("content", "")
-                usage = data.get("usage", {})
-                message_data = message
-                # Extract tool_calls
-                tool_calls_result = message.get("tool_calls", [])
-            
-            return {
-                "success": True,
-                "content": content,
-                "provider": provider,
-                "model": model,
-                "usage": usage,
-                "tool_calls": tool_calls_result,
-                "message_data": message_data,
-            }
-            
+
+            # 使用重试机制执行请求
+            result = self._chat_with_retry(provider, model, payload, headers)
+
+            # 如果成功或是从 fallback 模式传来，直接返回
+            if result["success"] or _fallback:
+                return result
+
+            # 模型降级：尝试其他可用 provider
+            # 优先级：MiniMax → OpenRouter → DeepSeek → Anthropic
+            fallback_order = ["openrouter", "deepseek", "anthropic", "google"]
+            tried = {provider}
+
+            for fb_provider in fallback_order:
+                if fb_provider in tried:
+                    continue
+                if not self.is_provider_available(fb_provider):
+                    continue
+                # vision 任务只能fallback到支持vision的provider
+                if image and not PROVIDERS[fb_provider].get("supports_vision"):
+                    continue
+                tried.add(fb_provider)
+                logger.info("Provider %s 失败，尝试 fallback 到 %s", provider, fb_provider)
+                fb_model = model  # 沿用原 model，也可以用对应 provider 的 default
+                fb_payload = self._build_payload_for_provider(
+                    fb_provider, prompt, model or DEFAULT_MODELS.get(fb_provider), system_prompt, image, messages, tools
+                )
+                fb_headers = self._get_headers(fb_provider)
+                fb_result = self._chat_with_retry(fb_provider, fb_model, fb_payload, fb_headers)
+                if fb_result["success"]:
+                    fb_result["fallback_from"] = provider
+                    return fb_result
+
+            # 全部失败
+            return result
+
         except httpx.TimeoutException:
             return {
                 "success": False,
@@ -635,7 +707,7 @@ class LLMClient:
                 "provider": provider,
                 "model": model,
                 "usage": {},
-                "error": "Request timed out",
+                "error": "Request timed out (after retries)",
             }
         except Exception as e:
             return {
@@ -646,6 +718,43 @@ class LLMClient:
                 "usage": {},
                 "error": f"Error: {str(e)}",
             }
+
+    def _build_payload_for_provider(
+        self, provider: str, prompt: str, model: str,
+        system_prompt: Optional[str], image: Optional[str],
+        messages: Optional[List[Dict]], tools: Optional[List[Dict]]
+    ) -> Dict[str, Any]:
+        """为指定 provider 构建请求 payload（供 fallback 使用）"""
+        if messages is not None:
+            # 使用已有的 messages
+            if provider == "minimax":
+                return {"model": model, "messages": messages, "stream": False}
+            elif provider in ["openrouter", "deepseek"]:
+                payload = {"model": model, "messages": messages, "stream": False}
+                if tools:
+                    payload["tools"] = tools
+                    payload["tool_choice"] = "auto"
+                return payload
+            elif provider == "anthropic":
+                msgs = [m for m in messages if m.get("role") != "system"]
+                sys_msg = next((m["content"] for m in messages if m.get("role") == "system"), None)
+                payload = {"model": model, "messages": msgs, "max_tokens": 4096}
+                if sys_msg:
+                    payload["system"] = sys_msg
+                return payload
+            elif provider == "google":
+                contents = [m for m in messages if m.get("role") == "user"]
+                return {"contents": contents, "generationConfig": {"temperature": 0.7, "maxOutputTokens": 8192}}
+        else:
+            if provider == "minimax":
+                return self._build_minimax_request(prompt, model, system_prompt, image)
+            elif provider in ["openrouter", "deepseek"]:
+                return self._build_openai_request(prompt, model, system_prompt, image)
+            elif provider == "anthropic":
+                return self._build_anthropic_request(prompt, model, system_prompt, image)
+            elif provider == "google":
+                return self._build_google_request(prompt, model, system_prompt, image)
+        return {}
     
     def chat_stream(
         self,
@@ -734,7 +843,64 @@ class LLMClient:
         
         return len(text) // chars_per_token + 1
     
-    def close(self):
+    def health_check(self) -> Dict[str, Any]:
+        """
+        健康检查：测试所有已配置 provider 的 API 连接。
+        
+        Returns:
+            Dict: 每个 provider 的状态 {provider: {available, latency_ms, error}}
+        """
+        import time
+        results = {}
+
+        for provider in PROVIDERS:
+            if not self.api_keys.get(provider):
+                results[provider] = {"available": False, "latency_ms": None, "error": "No API key"}
+                continue
+
+            start = time.time()
+            try:
+                # 构建最简单的测试请求
+                test_payload = {
+                    "model": DEFAULT_MODELS.get(provider, PROVIDERS[provider]["models"][0]),
+                    "messages": [{"role": "user", "content": "Hi"}],
+                    "stream": False,
+                    "max_tokens": 5,
+                }
+
+                client = self.clients.get(provider)
+                if not client:
+                    # 需要先初始化 client
+                    base_url = PROVIDERS[provider]["base_url"]
+                    client = httpx.Client(base_url=base_url, timeout=10.0)
+                    self.clients[provider] = client
+
+                endpoint = self._get_endpoint(provider, test_payload["model"])
+                headers = self._get_headers(provider)
+
+                if provider == "google":
+                    api_key = self.api_keys.get("google", "")
+                    url = f"{client.base_url}{endpoint}?key={api_key}"
+                    response = client.post(url, json=test_payload, headers=headers)
+                else:
+                    response = client.post(endpoint, json=test_payload, headers=headers)
+
+                latency = (time.time() - start) * 1000
+
+                if response.status_code == 200:
+                    results[provider] = {"available": True, "latency_ms": round(latency, 1), "error": None}
+                else:
+                    results[provider] = {
+                        "available": False,
+                        "latency_ms": round(latency, 1),
+                        "error": f"HTTP {response.status_code}",
+                    }
+            except httpx.TimeoutException:
+                results[provider] = {"available": False, "latency_ms": None, "error": "Timeout"}
+            except Exception as e:
+                results[provider] = {"available": False, "latency_ms": None, "error": str(e)[:80]}
+
+        return results
         """Close all HTTP clients."""
         for client in self.clients.values():
             client.close()
